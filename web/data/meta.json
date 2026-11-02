@@ -1,0 +1,11 @@
+{
+ "input": 42023,
+ "from_attr": 42004,
+ "from_polygon": 12,
+ "dropped": 7,
+ "attr_vs_polygon_agree": 41992,
+ "attr_vs_polygon_checked": 42003,
+ "assigned_not_nearest": 19036,
+ "parcels_out": 42016,
+ "pct_not_nearest": 45.3
+}

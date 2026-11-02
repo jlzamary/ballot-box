@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Line to the Ballot Box</title>
+<meta name="description" content="Hover a parcel in James City County or Williamsburg, VA to draw a line to its assigned Election Day polling place.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 13L14 3' stroke='%237dd3fc' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.css">
+<script>
+  // Set the theme before first paint: saved choice, else the OS preference.
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem('theme'); } catch (e) {}
+    if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+<style>
+  :root, :root[data-theme="dark"] {
+    --bg: #0f1419;
+    --panel: rgba(15, 20, 25, .88);
+    --text: #e8edf2;
+    --muted: #9aa7b4;
+    --rule: rgba(255, 255, 255, .12);
+    --card: rgba(255, 255, 255, .04);
+    --accent: #7dd3fc;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f6f8;
+    --panel: rgba(255, 255, 255, .92);
+    --text: #0f1b27;
+    --muted: #556575;
+    --rule: rgba(15, 27, 39, .14);
+    --card: rgba(15, 27, 39, .04);
+    --accent: #0369a1;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  #map { position: absolute; inset: 0; }
+
+  #panel { position: absolute; top: 16px; left: 16px; width: 320px; max-height: calc(100% - 32px); overflow: auto;
+    padding: 16px 18px; background: var(--panel); backdrop-filter: blur(8px);
+    border: 1px solid var(--rule); border-radius: 10px; z-index: 2; }
+  .eyebrow { margin: 0 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  h1 { margin: 0 0 6px; font-size: 20px; line-height: 1.2; }
+  .lede { margin: 0 0 12px; color: var(--muted); }
+  .lede[hidden] { display: none; }
+
+  button { font: inherit; color: var(--text); background: var(--card); border: 1px solid var(--rule);
+    border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible, .toggle input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #theme { display: block; margin-top: 12px; font-size: 12px; }
+
+  #detail { margin: 0 0 12px; padding: 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--card); }
+  #detail[hidden] { display: none; }
+  #addr { font-weight: 600; font-size: 15px; margin-bottom: 8px; }
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; text-align: right; }
+  #pollAddr { color: var(--muted); font-size: 12px; }
+  .note { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 12px; }
+  .actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+  #lock { margin: 0; font-size: 12px; color: var(--accent); }
+  #lock[hidden] { display: none; }
+  #clear { margin-left: auto; }
+
+  .toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 12px; }
+  .toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
+
+  .legend h2 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .bar { height: 8px; border-radius: 4px;
+    background: linear-gradient(90deg, #2a9d8f 0%, #8ab17d 22%, #e9c46a 44%, #f4a261 66%, #e76f51 100%); }
+  .ticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+  .fine { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--rule); font-size: 11px; color: var(--muted); }
+  .fine.plain { border: 0; margin-top: 6px; padding-top: 0; }
+  .fine a { color: var(--accent); }
+  .disclaimer { color: #dc143c; font-weight: 700; }
+
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; z-index: 3; background: var(--bg); transition: opacity .4s; }
+  #loading.done { opacity: 0; pointer-events: none; }
+
+  .maplibregl-ctrl-attrib { font-size: 10px; }
+
+  @media (max-width: 640px) {
+    #panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 48%; border-radius: 12px 12px 0 0; padding: 14px 16px; }
+    h1 { font-size: 17px; }
+    .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="loading">Loading parcels…</div>
+
+<aside id="panel">
+  <p class="eyebrow">#30DayMapChallenge · Day 2 · Lines</p>
+  <h1>Line to the ballot box</h1>
+  <p class="lede" id="lede">Hover over a parcel (tap on a phone) to draw a line to its assigned Election Day polling place.</p>
+
+  <div id="detail" hidden>
+    <div id="addr"></div>
+    <dl>
+      <dt>Precinct</dt><dd id="precinct"></dd>
+      <dt>Votes at</dt><dd><span id="poll"></span><br><span id="pollAddr"></span></dd>
+      <dt>Straight-line</dt><dd id="dist"></dd>
+    </dl>
+    <p class="note" id="nearest"></p>
+    <div class="actions">
+      <p id="lock" hidden>Selected. Click it again to release.</p>
+      <button id="clear" type="button" title="Clear selection (Esc)">Clear selection</button>
+    </div>
+  </div>
+
+  <label class="toggle"><input type="checkbox" id="all"> Draw a line for every parcel</label>
+
+  <div class="legend">
+    <h2>Distance to assigned polling place</h2>
+    <div class="bar"></div>
+    <div class="ticks"><span>0 mi</span><span>1</span><span>2</span><span>3</span><span>4.5+</span></div>
+  </div>
+
+  <p class="fine" id="stats"></p>
+  <p class="fine plain">
+    <strong class="disclaimer">Disclaimer:</strong> This is an unofficial demo. Precincts, polling places and parcels come from James City County and City of Williamsburg GIS and may be out of date.
+    Confirm where you vote online at <a href="https://vote.elections.virginia.gov/VoterInformation" target="_blank" rel="noopener">vote.elections.virginia.gov</a>.
+    Lines are straight, not driving routes. Early-voting sites are not shown.
+    This map was built with the help of AI and may contain errors, so use it with caution.
+  </p>
+  <button id="theme" type="button"></button>
+</aside>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const RAMP = [0, '#2a9d8f', 1, '#8ab17d', 2, '#e9c46a', 3, '#f4a261', 4.5, '#e76f51'];
+const distColor = ['interpolate', ['linear'], ['get', 'd'], ...RAMP];
+const EMPTY = { type: 'FeatureCollection', features: [] };
+const LEDE = $('lede').textContent;
+
+// Everything that differs between the two basemaps.
+const THEMES = {
+  dark: {
+    style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+    ink: '#ffffff', halo: '#0f1419', core: '#ffffff', glow: '#7dd3fc', active: '#7dd3fc',
+    pollFill: '#0f1419', precinct: '#c9d4df', precinctOp: 0.45,
+    fill: 0.4, fillAll: 0.12, allLines: [0.1, 0.3],
+  },
+  light: {
+    style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+    ink: '#0b1b2b', halo: '#ffffff', core: '#0b1b2b', glow: '#0ea5e9', active: '#0ea5e9',
+    pollFill: '#ffffff', precinct: '#334155', precinctOp: 0.5,
+    fill: 0.55, fillAll: 0.18, allLines: [0.16, 0.45],
+  },
+};
+let theme = document.documentElement.dataset.theme;
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: THEMES[theme].style,
+  bounds: [[-76.93, 37.17], [-76.55, 37.47]],
+  fitBoundsOptions: window.innerWidth > 640
+    ? { padding: { top: 20, bottom: 20, left: 360, right: 20 } }
+    : { padding: { top: 20, bottom: Math.round(window.innerHeight * 0.5), left: 10, right: 10 } },
+  attributionControl: false,
+});
+map.addControl(new maplibregl.AttributionControl({
+  compact: true,
+  customAttribution: 'Parcels, precincts &amp; polling places: James City County GIS, City of Williamsburg GIS',
+}));
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+
+function miles(lon1, lat1, lon2, lat2) {
+  const r = (d) => d * Math.PI / 180;
+  const a = Math.sin(r(lat2 - lat1) / 2) ** 2 + Math.cos(r(lat1)) * Math.cos(r(lat2)) * Math.sin(r(lon2 - lon1) / 2) ** 2;
+  return 3958.8 * 2 * Math.asin(Math.sqrt(a));
+}
+
+const hoverFlag = ['boolean', ['feature-state', 'hover'], false];
+
+async function main() {
+  const [parcels, precincts, pollsFc, meta] = await Promise.all(
+    ['parcels', 'precincts', 'polls'].map((n) => fetch(`data/${n}.geojson`).then((r) => r.json()))
+      .concat(fetch('data/meta.json').then((r) => r.json()))
+  );
+  const polls = pollsFc.features.map((f) => ({ ...f.properties, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] }));
+  const precinctByPoll = Object.fromEntries(polls.map((p) => [p.i, p.p]));
+
+  $('stats').textContent =
+    `${meta.parcels_out.toLocaleString()} parcels, ${polls.length} polling places. ` +
+    `${meta.pct_not_nearest}% of parcels are assigned to a site that is not their straight-line nearest.`;
+
+  // ---- state that must survive a basemap swap
+  let active = null;        // properties of the parcel currently drawn, or null
+  let hoverId = null, lockedId = null;
+  let swapping = false;     // basemap reloading: our sources don't exist yet
+  let paused = false;       // true after "Clear selection": hover does nothing until the next click
+  let allLinesData = null;  // built on first use
+  const allOn = () => $('all').checked;
+
+  // ---- sources + layers (re-run after every setStyle, which drops them)
+  function installLayers() {
+    const t = THEMES[theme];
+    map.addSource('parcels', { type: 'geojson', data: parcels, promoteId: 'i' });
+    map.addSource('precincts', { type: 'geojson', data: precincts });
+    map.addSource('polls', { type: 'geojson', data: pollsFc });
+    map.addSource('link', { type: 'geojson', data: EMPTY });
+    map.addSource('all-lines', { type: 'geojson', data: allLinesData || EMPTY });
+
+    map.addLayer({ id: 'parcels-fill', type: 'fill', source: 'parcels', paint: {
+      'fill-color': distColor, 'fill-opacity': ['case', hoverFlag, 0.95, allOn() ? t.fillAll : t.fill],
+    } });
+    map.addLayer({ id: 'parcels-edge', type: 'line', source: 'parcels', paint: {
+      'line-color': t.core, 'line-width': ['case', hoverFlag, 2, 0],
+    } });
+    map.addLayer({ id: 'precinct-lines', type: 'line', source: 'precincts', paint: {
+      'line-color': t.precinct, 'line-opacity': t.precinctOp, 'line-width': 1, 'line-dasharray': [3, 2],
+    } });
+    map.addLayer({ id: 'all-lines', type: 'line', source: 'all-lines', layout: { visibility: allOn() ? 'visible' : 'none' }, paint: {
+      'line-color': distColor, 'line-width': 0.6,
+      'line-opacity': ['interpolate', ['linear'], ['zoom'], 9, t.allLines[0], 13, t.allLines[1]],
+    } });
+    map.addLayer({ id: 'link-glow', type: 'line', source: 'link', filter: ['==', ['geometry-type'], 'LineString'],
+      layout: { 'line-cap': 'round' }, paint: { 'line-color': t.glow, 'line-width': 10, 'line-blur': 8, 'line-opacity': 0.55 } });
+    map.addLayer({ id: 'link-core', type: 'line', source: 'link', filter: ['==', ['geometry-type'], 'LineString'],
+      layout: { 'line-cap': 'round' }, paint: { 'line-color': t.core, 'line-width': 2.2 } });
+    map.addLayer({ id: 'link-start', type: 'circle', source: 'link', filter: ['==', ['geometry-type'], 'Point'],
+      paint: { 'circle-radius': 4.5, 'circle-color': t.core, 'circle-stroke-color': t.halo, 'circle-stroke-width': 1.5 } });
+    map.addLayer({ id: 'polls', type: 'circle', source: 'polls', paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 3.5, 14, 7],
+      'circle-color': t.pollFill, 'circle-stroke-color': t.ink, 'circle-stroke-width': 2,
+    } });
+    map.addLayer({ id: 'polls-active', type: 'circle', source: 'polls', filter: ['==', ['get', 'i'], active ? active.v : -1], paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 7, 14, 11],
+      'circle-color': t.active, 'circle-stroke-color': t.ink, 'circle-stroke-width': 2.5,
+    } });
+    map.addLayer({ id: 'poll-labels', type: 'symbol', source: 'polls', minzoom: 11.5, layout: {
+      'text-field': ['get', 'n'], 'text-font': ['Montserrat SemiBold', 'Open Sans Bold'], 'text-size': 11,
+      'text-offset': [0, 1.1], 'text-anchor': 'top', 'text-max-width': 9,
+    }, paint: { 'text-color': t.ink, 'text-halo-color': t.halo, 'text-halo-width': 1.6 } });
+  }
+
+  // ---- selection
+  const setHover = (id) => {
+    if (id === hoverId) return;
+    if (hoverId !== null) map.setFeatureState({ source: 'parcels', id: hoverId }, { hover: false });
+    hoverId = id;
+    if (id !== null) map.setFeatureState({ source: 'parcels', id }, { hover: true });
+  };
+
+  function activate(p) {
+    active = p;
+    setHover(p.i);
+    const poll = polls[p.v];
+    $('lede').hidden = true;
+    $('detail').hidden = false;
+    $('addr').textContent = p.a || 'No street address on record';
+    $('precinct').textContent = precinctByPoll[p.v];
+    $('poll').textContent = poll.n;
+    $('pollAddr').textContent = poll.a;
+    $('dist').textContent = `${p.d.toFixed(2)} mi`;
+
+    let best = p.v, bestD = p.d;
+    polls.forEach((q, k) => { const d = miles(p.x, p.y, q.lon, q.lat); if (d < bestD - 1e-6) { best = k; bestD = d; } });
+    $('nearest').textContent = best === p.v
+      ? 'This is also the nearest polling place as the crow flies.'
+      : `${polls[best].n} is closer as the crow flies (${bestD.toFixed(2)} mi), but precinct boundaries decide where you vote.`;
+
+    map.getSource('link').setData({ type: 'FeatureCollection', features: [
+      { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[p.x, p.y], [poll.lon, poll.lat]] } },
+      { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [p.x, p.y] } },
+    ] });
+    map.setFilter('polls-active', ['==', ['get', 'i'], p.v]);
+  }
+
+  // Remove the highlighted parcel and its line so only the background (or all-lines) view remains.
+  function clearSelection() {
+    lockedId = null;
+    active = null;
+    paused = true;
+    setHover(null);
+    map.getSource('link').setData(EMPTY);
+    map.setFilter('polls-active', ['==', ['get', 'i'], -1]);
+    $('detail').hidden = true;
+    $('lock').hidden = true;
+    $('lede').hidden = false;
+    $('lede').textContent = 'Selection cleared. Click a parcel to explore again.';
+  }
+
+  map.on('mousemove', 'parcels-fill', (e) => {
+    map.getCanvas().style.cursor = 'pointer';
+    if (lockedId !== null || paused || swapping) return;
+    activate(e.features[0].properties);
+  });
+  map.on('mouseleave', 'parcels-fill', () => { map.getCanvas().style.cursor = ''; });
+
+  map.on('click', (e) => {
+    if (swapping) return;
+    const hit = map.queryRenderedFeatures(e.point, { layers: ['parcels-fill'] })[0];
+    if (!hit) { lockedId = null; $('lock').hidden = true; return; }  // empty map releases a lock but keeps the line
+    paused = false;
+    $('lede').textContent = LEDE;
+    if (hit.properties.i === lockedId) { lockedId = null; $('lock').hidden = true; activate(hit.properties); return; }
+    lockedId = hit.properties.i;
+    $('lock').hidden = false;
+    activate(hit.properties);
+  });
+
+  $('clear').addEventListener('click', () => { if (!swapping) clearSelection(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && active && !swapping) clearSelection(); });
+
+  // ---- all-parcel lines
+  $('all').addEventListener('change', (e) => {
+    const t = THEMES[theme];
+    if (e.target.checked && !allLinesData) {
+      allLinesData = { type: 'FeatureCollection', features: parcels.features.map((f) => {
+        const p = f.properties, q = polls[p.v];
+        return { type: 'Feature', properties: { d: p.d }, geometry: { type: 'LineString', coordinates: [[p.x, p.y], [q.lon, q.lat]] } };
+      }) };
+      map.getSource('all-lines').setData(allLinesData);
+    }
+    map.setLayoutProperty('all-lines', 'visibility', e.target.checked ? 'visible' : 'none');
+    map.setPaintProperty('parcels-fill', 'fill-opacity', ['case', hoverFlag, 0.95, e.target.checked ? t.fillAll : t.fill]);
+  });
+
+  // ---- theme
+  function labelThemeButton() {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    $('theme').textContent = next === 'light' ? 'Light mode' : 'Dark mode';
+    $('theme').setAttribute('aria-label', `Switch to ${next} mode`);
+  }
+  $('theme').addEventListener('click', () => {
+    theme = theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('theme', theme); } catch (e) {}
+    labelThemeButton();
+    hoverId = null;  // feature-state is wiped along with the old style
+    swapping = true;
+    map.setStyle(THEMES[theme].style, { diff: false });  // diffing would silently drop our layers without re-firing style.load
+    map.once('style.load', () => {
+      swapping = false;
+      installLayers();
+      if (active) activate(active);
+    });
+  });
+  labelThemeButton();
+
+  installLayers();
+  $('loading').classList.add('done');
+}
+
+map.on('load', main);
+</script>
+</body>
+</html>
